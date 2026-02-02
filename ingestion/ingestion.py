@@ -112,26 +112,45 @@ try:
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
     
-    # Extract only CREATE TABLE statements (ignore INSERT, DROP, etc.)
+    # Extract CREATE TABLE and INSERT statements
     create_statements = re.findall(
         r"CREATE\s+TABLE\s+[\[\`\"]?\w+[\]\`\"]?[\s\S]*?;",
         sql_text,
         flags=re.IGNORECASE
     )
     
+    insert_statements = re.findall(
+        r"INSERT\s+INTO\s+[\[\`\"]?\w+[\]\`\"]?[\s\S]*?;",
+        sql_text,
+        flags=re.IGNORECASE
+    )
+    
     # Execute each CREATE TABLE statement
+    create_count = 0
     for statement in create_statements:
         try:
             cursor.execute(statement)
+            create_count += 1
         except sqlite3.Error as e:
-            log_warning(f"SQL Error executing statement: {e}")
+            log_warning(f"SQL Error executing CREATE TABLE: {e}")
+            continue
+    
+    # Execute each INSERT statement
+    insert_count = 0
+    for statement in insert_statements:
+        try:
+            cursor.execute(statement)
+            insert_count += 1
+        except sqlite3.Error as e:
+            log_warning(f"SQL Error executing INSERT: {e}")
             continue
     
     conn.commit()
     conn.close()
     
     log_success(f"Database created successfully: {db_path}")
-    log_info(f"  - Tables created: {len(create_statements)}")
+    log_info(f"  - Tables created: {create_count}")
+    log_info(f"  - Rows inserted: {insert_count}")
     
 except Exception as e:
     log_error(f"Failed to create database: {e}")
