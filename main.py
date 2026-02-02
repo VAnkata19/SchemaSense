@@ -1,213 +1,372 @@
-from typing import Any, Dict, List
+"""
+SchemaSense - Natural Language to SQL Chat Interface
+Clean, refactored implementation with proper Streamlit state management.
+"""
+
+from typing import Any, Dict, List, Optional
 import streamlit as st
 from streamlit_extras.stylable_container import stylable_container
 from backend.core import run_llm, format_sql_results
 from backend.run_sql_query import run_sql_query
-from html import escape
 
-def _format_sources(context_docs: List[Any]) -> List[str]:
-    return [
-        str((meta.get("source") or "unknown"))
-        for doc in (context_docs or [])
-        if (meta := (getattr(doc, "metadata", None) or {})) is not None
-    ]
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
 
 st.set_page_config(page_title="SchemaSense", layout="centered")
-st.title("SchemaSense")
 
-with st.sidebar:
-    st.subheader("Configuration")
-    if st.button("Clear chat history", use_container_width=True):
-        st.session_state.pop("messages", None)
-        st.session_state.pop("pending_result", None)
-        st.rerun()
+# ============================================================================
+# SESSION STATE INITIALIZATION
+# ============================================================================
 
-if "messages" not in st.session_state:
+def init_session_state():
+    """Initialize all session state variables."""
+    defaults = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "Ask me questions about the company data or schema.",
+            }
+        ],
+        "last_results": None,
+        "pending_sql": None,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+init_session_state()
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def add_message(role: str, content: str, **kwargs):
+    """Add a message to chat history."""
+    msg = {"role": role, "content": content, **kwargs}
+    st.session_state.messages.append(msg)
+
+def clear_chat():
+    """Clear chat history and reset state."""
     st.session_state.messages = [
         {
-            "role": "assistant",
+            "role": "assistant", 
             "content": "Ask me questions about the company data or schema.",
-            "sources": []
         }
     ]
+    st.session_state.last_results = None
+    st.session_state.pending_sql = None
 
-if "pending_result" not in st.session_state:
-    st.session_state.pending_result = None
+def execute_sql(sql: str, original_query: str) -> Optional[Dict[str, Any]]:
+    """Execute SQL and return formatted results."""
+    try:
+        result = run_sql_query(sql)
+        
+        if isinstance(result, dict) and result.get("error"):
+            return {"error": result.get("error")}
+        
+        rows = result.get("rows") if isinstance(result, dict) else result
+        rows = rows if isinstance(rows, list) else []
+        
+        # Format results using LLM
+        formatted = format_sql_results(original_query, sql, rows)
+        
+        return {
+            "success": True,
+            "message": formatted.get("message", "Results displayed."),
+            "rows": formatted.get("rows", rows),
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
-if "executing_query" not in st.session_state:
-    st.session_state.executing_query = False
+def execute_sql_and_export(sql: str, original_query: str, export_format: str) -> Dict[str, Any]:
+    """Execute SQL, format results, and generate export file."""
+    from backend.core import generate_export
+    
+    try:
+        result = run_sql_query(sql)
+        
+        if isinstance(result, dict) and result.get("error"):
+            return {"error": result.get("error")}
+        
+        rows = result.get("rows") if isinstance(result, dict) else result
+        rows = rows if isinstance(rows, list) else []
+        
+        if not rows:
+            return {"error": "Query returned no results to export."}
+        
+        # Sanitize rows
+        def sanitize(val):
+            if isinstance(val, bytes):
+                try:
+                    return val.decode("utf-8")
+                except Exception:
+                    return val.hex()
+            return val
+        
+        safe_rows = [{k: sanitize(v) for k, v in row.items()} for row in rows]
+        
+        # Generate export
+        export_result = generate_export(safe_rows, export_format)
+        
+        if not export_result["success"]:
+            return {"error": export_result["error"]}
+        
+        return {
+            "success": True,
+            "rows": safe_rows,
+            "file_data": export_result["file_data"],
+            "file_name": export_result["file_name"],
+            "mime": export_result["mime"],
+            "format": export_format,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
-# Display chat history
-for msg in st.session_state.messages:
-    content = msg.get("content", "")
-    role = msg.get("role", "assistant")
-
-    # If this assistant message indicates a SQL execution failure, render entire chat bubble with red border
-    if role == "assistant" and isinstance(content, str) and content.strip().startswith("SQL execution failed"):
-        with stylable_container(
-            "sql_error_msg",
-            css_styles="""
-            [data-testid="stChatMessage"] {
-                border: 3px solid #dc2626 !important;
-                background-color: #ff5656 !important;
-            }
-            """,
-        ):
-            with st.chat_message(role):
-                st.markdown(content)
+def process_user_input(prompt: str):
+    """Process user input and generate response."""
+    # Add user message
+    add_message("user", prompt)
+    
+    # Get LLM response
+    result = run_llm(prompt, st.session_state.last_results)
+    response_type = result.get("type", "answer")
+    
+    if response_type == "export":
+        # Export file response
+        add_message(
+            "assistant",
+            result.get("answer", "Here you go!"),
+            file_data=result.get("file_data"),
+            file_name=result.get("file_name"),
+            file_mime=result.get("mime"),
+        )
+        return {"type": "export"}
+    
+    elif response_type == "sql_and_export":
+        # SQL + Export combined - store for approval
+        sql = result.get("sql")
+        export_format = result.get("export_format", "csv")
+        st.session_state.pending_sql = {
+            "sql": sql,
+            "original_query": prompt,
+            "export_format": export_format,
+            "auto_export": True,
+        }
+        return {"type": "sql_and_export", "sql": sql, "format": export_format}
+    
+    elif response_type == "sql":
+        # SQL query needs approval
+        sql = result.get("sql")
+        st.session_state.pending_sql = {
+            "sql": sql,
+            "original_query": prompt,
+        }
+        return {"type": "sql", "sql": sql}
+    
     else:
-        with st.chat_message(role):
-            st.markdown(content)
+        # Direct answer
+        add_message("assistant", result.get("answer", "No answer returned."))
+        return {"type": "answer"}
 
-# Initialize pending_result if not present
-if "pending_result" not in st.session_state:
-    st.session_state.pending_result = None
-
-# STEP 1: Process new user prompt
-prompt = st.chat_input("Ask a question (e.g. 'give me customers only data')")
-if prompt:
-    st.session_state.messages.append(
-        {"role": "user", "content": prompt, "sources": []}
-    )
-
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant"):
-        try:
-            with st.spinner("Thinking..."):
-                result: Dict[str, Any] = run_llm(prompt)
-
-            response_type = result.get("type", "answer")
-            answer = result.get("answer", "")
-            sources = _format_sources(result.get("content", []))
-            sql = result.get("sql")
-
-            # CASE 1: Direct answer
-            if response_type == "answer":
-                st.markdown(answer or "No answer returned.")
-
-                # sources are intentionally not displayed on the page
-
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                        "sources": sources
-                    }
-                )
-
-            # CASE 2: SQL query - store for user approval
-            elif response_type == "sql" and sql:
-                st.session_state.pending_result = {
-                    "sql": sql,
-                    "sources": sources,
-                    "original_query": prompt,  # Store the original user query
-                }
-
-        except Exception as e:
-            st.error("Failed to generate response")
-            st.exception(e)
-            import traceback
-            traceback.print_exc()
-
-# STEP 2: Handle executing state first (before rendering any buttons)
-if st.session_state.executing_query:
-    pending = st.session_state.get("pending_result")
-    if pending and pending.get("sql"):
-        sql = pending.get("sql")
-        sources = pending.get("sources", [])
-        original_query = pending.get("original_query", "")
-
-        st.markdown("**Executing SQL query...**")
-        st.code(sql, language="sql")
-
-        try:
-            # STEP 2A: Run query with spinner
-            with st.spinner("Running query..."):
-                result = run_sql_query(sql)
-
-            # If the runner returned an error, display it on the page
-            if isinstance(result, dict) and result.get("error"):
-                err = result.get("error")
-                st.error(f"SQL execution failed: {err}")
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": f"SQL execution failed: {err}",
-                        "sources": sources,
-                    }
-                )
+def handle_sql_approval(approved: bool):
+    """Handle SQL approval/denial."""
+    pending = st.session_state.pending_sql
+    
+    if not pending:
+        return
+    
+    if approved:
+        sql = pending["sql"]
+        original_query = pending["original_query"]
+        auto_export = pending.get("auto_export", False)
+        export_format = pending.get("export_format", "csv")
+        
+        if auto_export:
+            # Execute SQL and auto-export
+            result = execute_sql_and_export(sql, original_query, export_format)
+            
+            if result.get("error"):
+                add_message("assistant", f"SQL execution failed: {result['error']}")
             else:
-                rows = result.get("rows") if isinstance(result, dict) else result
-
-                # STEP 2B: Format results with spinner
-                with st.spinner("Formatting results..."):
-                    formatted_response = format_sql_results(original_query, sql, rows)
-
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": formatted_response,
-                        "sources": sources,
-                    }
+                st.session_state.last_results = result.get("rows", [])
+                add_message(
+                    "assistant",
+                    f"Here you go! Your {export_format.upper()} file with {len(result['rows'])} rows is ready.",
+                    file_data=result["file_data"],
+                    file_name=result["file_name"],
+                    file_mime=result["mime"],
                 )
+        else:
+            # Regular SQL execution
+            result = execute_sql(sql, original_query)
+            
+            if result.get("error"):
+                add_message("assistant", f"SQL execution failed: {result['error']}")
+            else:
+                st.session_state.last_results = result.get("rows", [])
+                add_message("assistant", result.get("message", "Query executed."))
+    else:
+        add_message("assistant", "SQL execution denied.")
+    
+    # Clear pending
+    st.session_state.pending_sql = None
 
-        except Exception as e:
-            st.error("Unexpected error during SQL execution")
-            st.exception(e)
-            import traceback
-            traceback.print_exc()
+# ============================================================================
+# UI COMPONENTS
+# ============================================================================
 
-        # Clear states and rerun to show result in chat
-        st.session_state.pending_result = None
-        st.session_state.executing_query = False
-        st.rerun()
+def render_message(msg: Dict[str, Any], idx: int):
+    """Render a single chat message."""
+    role = msg.get("role", "assistant")
+    content = msg.get("content", "")
+    file_data = msg.get("file_data")
+    
+    # Check for error message styling
+    is_error = (
+        role == "assistant" 
+        and isinstance(content, str) 
+        and content.startswith("SQL execution failed")
+    )
+    
+    with st.chat_message(role):
+        if is_error:
+            st.error(content)
+        else:
+            st.markdown(content)
+        
+        # Download button for export messages
+        if file_data:
+            st.download_button(
+                label=f"Download {msg.get('file_name', 'file')}",
+                data=file_data,
+                file_name=msg.get("file_name"),
+                mime=msg.get("file_mime"),
+                use_container_width=True,
+                key=f"download_{idx}",
+            )
 
-# STEP 3: Display pending SQL and buttons (only if NOT executing)
-elif st.session_state.get("pending_result") and st.session_state.pending_result.get("sql"):
-    pending = st.session_state.pending_result
-    sql = pending.get("sql")
-
-    st.markdown("The model wants to run this SQL:")
+def render_sql_approval(sql: str, auto_export: bool = False, export_format: str = None):
+    """Render SQL approval UI."""
+    st.markdown("**The model wants to run this SQL:**")
     st.code(sql, language="sql")
-
+    
+    if auto_export and export_format:
+        st.info(f"Will automatically export as **{export_format.upper()}** after execution")
+    
     col1, col2 = st.columns(2)
-
+    
     with col1:
         with stylable_container(
-            "allow_pending",
+            "green_button",
             css_styles="""
             button {
                 background-color: #16a34a;
-                color: #ffffff;
+                color: white;
                 border: none;
-                font-weight: bold;
+            }
+            button:hover {
+                background-color: #15803d;
+                color: white;
             }
             """,
         ):
-            allow_pending = st.button("Allow & Run", use_container_width=True, key="allow_pending")
-
+            if st.button("Allow & Run", use_container_width=True):
+                handle_sql_approval(True)
+                st.rerun()
+    
     with col2:
         with stylable_container(
-            "deny_pending",
+            "red_button",
             css_styles="""
             button {
                 background-color: #dc2626;
-                color: #ffffff;
+                color: white;
                 border: none;
-                font-weight: bold;
+            }
+            button:hover {
+                background-color: #b91c1c;
+                color: white;
             }
             """,
         ):
-            deny_pending = st.button("Deny", use_container_width=True, key="deny_pending")
+            if st.button("Deny", use_container_width=True):
+                handle_sql_approval(False)
+                st.rerun()
 
-    if allow_pending:
-        # Set flag and rerun - work will be done on next rerun
-        st.session_state.executing_query = True
-        st.rerun()
+def render_chat_history():
+    """Render all chat messages."""
+    for idx, msg in enumerate(st.session_state.messages):
+        render_message(msg, idx)
 
-    if deny_pending:
-        st.warning("SQL execution denied by user.")
-        st.session_state.pending_result = None
+# ============================================================================
+# MAIN APP
+# ============================================================================
+
+# Header
+st.title("SchemaSense")
+
+# Sidebar
+with st.sidebar:
+    st.subheader("Settings")
+    if st.button("Clear Chat", use_container_width=True):
+        clear_chat()
         st.rerun()
+    
+    st.divider()
+    st.caption("Ask questions about your data in natural language.")
+
+# Render chat history
+render_chat_history()
+
+# Pending SQL approval
+if st.session_state.pending_sql:
+    pending = st.session_state.pending_sql
+    render_sql_approval(
+        pending["sql"],
+        auto_export=pending.get("auto_export", False),
+        export_format=pending.get("export_format"),
+    )
+
+# Chat input
+if prompt := st.chat_input("Ask a question (e.g., 'show me all categories')"):
+    # Clear any pending SQL when new prompt comes in
+    if st.session_state.pending_sql:
+        st.session_state.pending_sql = None
+    
+    # Show user message immediately
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # Process and show assistant response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            try:
+                result = process_user_input(prompt)
+                
+                if result["type"] in ("sql", "sql_and_export"):
+                    # SQL needs approval - rerun to show approval UI
+                    st.rerun()
+                
+                elif result["type"] == "export":
+                    # Get the last message (the export message we just added)
+                    last_msg = st.session_state.messages[-1]
+                    st.markdown(last_msg["content"])
+                    if last_msg.get("file_data"):
+                        st.download_button(
+                            label=f"Download {last_msg.get('file_name', 'file')}",
+                            data=last_msg["file_data"],
+                            file_name=last_msg["file_name"],
+                            mime=last_msg["file_mime"],
+                            use_container_width=True,
+                        )
+                
+                else:
+                    # Regular answer - show it
+                    last_msg = st.session_state.messages[-1]
+                    st.markdown(last_msg["content"])
+                    
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+                import traceback
+                traceback.print_exc()
