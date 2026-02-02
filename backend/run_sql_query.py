@@ -1,7 +1,7 @@
 import sqlite3
 import re
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Hard block anything that can mutate the DB
 FORBIDDEN_SQL = re.compile(
@@ -32,7 +32,7 @@ def _validate_sql(sql: str) -> None:
 
 def run_sql_query(
     sql: str,
-    db_path: str = None,
+    db_path: Optional[str] = None,
     limit: int = 100
 ) -> Dict[str, Any]:
     """

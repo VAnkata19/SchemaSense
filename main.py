@@ -201,9 +201,9 @@ def handle_sql_approval(approved: bool):
             # Regular SQL execution
             result = execute_sql(sql, original_query)
             
-            if result.get("error"):
+            if result and result.get("error"):
                 add_message("assistant", f"SQL execution failed: {result['error']}")
-            else:
+            elif result:
                 st.session_state.last_results = result.get("rows", [])
                 add_message("assistant", result.get("message", "Query executed."))
     else:
@@ -246,7 +246,7 @@ def render_message(msg: Dict[str, Any], idx: int):
                 key=f"download_{idx}",
             )
 
-def render_sql_approval(sql: str, auto_export: bool = False, export_format: str = None):
+def render_sql_approval(sql: str, auto_export: bool = False, export_format: Optional[str] = None):
     """Render SQL approval UI."""
     st.markdown("**The model wants to run this SQL:**")
     st.code(sql, language="sql")
