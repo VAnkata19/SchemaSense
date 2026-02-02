@@ -106,7 +106,7 @@ vector_store.add_documents(final_docs)
 log_success("Ingestion complete: SQL schema documents have been embedded and stored.")
 
 # Create SQLite database from SQL file
-db_path = Path(__file__).parent.parent / "data" / "northwind.db"
+db_path = Path(__file__).parent.parent / "data" / "app.db"
 try:
     # Connect to SQLite database (creates it if it doesn't exist)
     conn = sqlite3.connect(str(db_path))
