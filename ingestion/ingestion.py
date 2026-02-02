@@ -17,9 +17,9 @@ import re
 
 # Use absolute path or find the file
 sql_file_paths = [
-    "nstnwnd.sql",
-    "/Users/vankatabot/Documents/GitHub/Internal-Company-Knowledge-Copilot/nstnwnd.sql",
-    "./nstnwnd.sql",
+    "data/nstnwnd.sql",
+    "/Users/vankatabot/Documents/GitHub/Internal-Company-Knowledge-Copilot/data/nstnwnd.sql",
+    "./data/nstnwnd.sql",
 ]
 
 sql_text = None
@@ -106,7 +106,7 @@ vector_store.add_documents(final_docs)
 log_success("Ingestion complete: SQL schema documents have been embedded and stored.")
 
 # Create SQLite database from SQL file
-db_path = Path(__file__).parent.parent / "northwind.db"
+db_path = Path(__file__).parent.parent / "data" / "northwind.db"
 try:
     # Connect to SQLite database (creates it if it doesn't exist)
     conn = sqlite3.connect(str(db_path))

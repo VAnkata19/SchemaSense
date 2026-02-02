@@ -57,7 +57,7 @@ def run_sql_query(
 
     # Use absolute path to avoid relative path issues with Streamlit reruns
     if db_path is None:
-        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "northwind.db")
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "northwind.db")
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row

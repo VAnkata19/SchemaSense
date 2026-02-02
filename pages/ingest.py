@@ -17,7 +17,7 @@ st.set_page_config(page_title="Ingestion | SchemaSense", layout="centered")
 PROJECT_ROOT = Path(__file__).parent.parent
 VENV_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
 INGESTION_SCRIPT = PROJECT_ROOT / "ingestion" / "ingestion.py"
-SQL_FILE_PATH = PROJECT_ROOT / "nstnwnd.sql"
+SQL_FILE_PATH = PROJECT_ROOT / "data" / "nstnwnd.sql"
 
 # ============================================================================
 # UI
