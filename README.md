@@ -200,10 +200,6 @@ When adding new features:
 3. Update this README with new components
 4. Test with sample queries
 
-## License
-
-[Add your license here]
-
 ## Contact
 
 For questions or issues, please contact the development team.
