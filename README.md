@@ -6,6 +6,10 @@ A natural language to SQL chat interface powered by LLM technology, enabling use
 
 SchemaSense is a Streamlit-based application that bridges the gap between business users and databases. It leverages OpenAI's language models to convert natural language questions into SQL queries, execute them, and provide insights through interactive chat, data exports, and visualizations.
 
+## Short Demo
+
+https://github.com/user-attachments/assets/cf461532-01a2-491a-af26-1ea619c141af
+
 ## Features
 
 - **Natural Language Querying**: Ask questions about your data in plain English
