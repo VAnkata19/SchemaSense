@@ -1,4 +1,4 @@
-# SchemaSense - Internal Company Knowledge Copilot
+# SchemaSense
 
 Stop writing SQL. Start asking questions. SchemaSense turns your company's database into a conversational knowledge base — letting anyone on your team extract insights, generate reports, and visualize data just by typing what they want to know.
 
